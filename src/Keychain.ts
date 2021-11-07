@@ -94,6 +94,49 @@ export class Keychain {
     )
   }
 
+  public async getItems(): Promise<
+    Omit<GenericPasswordItem, 'password' | 'applications' | 'replace'>[]
+  > {
+    const items: Array<
+      Omit<GenericPasswordItem, 'password' | 'applications' | 'replace'>
+    > = []
+    const output = await exec(SECURITY, 'dump-keychain', this.fileName)
+
+    const blocks: string[] = []
+    let current = ''
+    output.split('\n').forEach((line) => {
+      if (line.startsWith('keychain: ')) {
+        if (current !== '') {
+          blocks.push(current)
+          current = ''
+        }
+      }
+      current += line + '\n'
+    })
+    if (current !== '') {
+      blocks.push(current)
+    }
+
+    const find = (content: string, start: string, end: string): string => {
+      const index = content.indexOf(start)
+      if (index < 0) return ''
+      const s = index + start.length
+      const e = content.indexOf(end, s)
+      if (index < 0) return ''
+
+      return content.substring(s, e)
+    }
+    
+    for (const block of blocks) {
+      items.push({
+        account: find(block, '    0x00000007 <blob>="', '"'),
+        service: find(block, '    "svce"<blob>="', '"'),
+      })
+    }
+
+    return items
+  }
+
   public async findGenericPassword(
     item: Omit<GenericPasswordItem, 'password' | 'applications' | 'replace'>,
   ): Promise<string> {
@@ -109,7 +152,6 @@ export class Keychain {
       '-w',
       this.fileName,
     )
-
     if (/^[a-f0-9]+$/i.test(password)) {
       const result = new TextDecoder().decode(
         Hex.decode(new TextEncoder().encode(password)),
@@ -187,9 +229,9 @@ async function exec(command: string, ...args: string[]): Promise<string> {
   })
 
   try {
-    const status = await process.status()
     const decoder = new TextDecoder()
-    const [error, output] = await Promise.all([
+    const [status, error, output] = await Promise.all([
+      process.status(),
       process.stderrOutput(),
       process.output(),
     ])
